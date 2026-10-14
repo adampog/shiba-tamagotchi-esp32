@@ -11,6 +11,7 @@
 #include <Preferences.h>
 #include "sprites.h"
 #include "pet_types.h"
+#include "gamepad.h"
 
 // ---------- hardware ----------
 #define LCD_CS 12
@@ -33,6 +34,8 @@
 #define SCENE_H 280
 #define BTN_Y 362
 #define FLOOR_Y (SCENE_Y + 255)  // where the dog's paws touch the floor
+#define GAME_BTN_X 160
+#define GAME_BTN_W 64
 
 Arduino_DataBus *bus = new Arduino_ESP32QSPI(LCD_CS, LCD_SCK, LCD_D0, LCD_D1, LCD_D2, LCD_D3);
 Arduino_OLED *panel = nullptr;  // SH8601 or CO5300, picked in setup()
@@ -124,6 +127,8 @@ uint32_t nextBlink = 0, blinkUntil = 0, nextChatter = 0, nextSave = 0;
 char bubble[28] = "";
 uint32_t bubbleUntil = 0;
 int pressedBtn = -1;
+int padSel = 0;  // care button selected with the controller D-pad
+bool gameActive = false;  // Treat Catch mini game is running (minigame.ino)
 uint32_t pressedUntil = 0, lastTouch = 0;
 bool dimmed = false;
 const int POOP_X[4] = { 64, 304, 118, 252 };
@@ -215,6 +220,11 @@ void onButton(int b) {
 
 void onTap(int x, int y) {
   if (y >= BTN_Y) { onButton(constrain(x / (W / 4), 0, 3)); return; }
+  if (y < 48 && x >= GAME_BTN_X - 6 && x < GAME_BTN_X + GAME_BTN_W + 6) {
+    if (pet.asleep) say("Zzz...", 1200);
+    else gameEnter();
+    return;
+  }
   // poop?
   for (int i = 0; i < pet.poops; i++) {
     if (abs(x - POOP_X[i]) < 26 && abs(y - (FLOOR_Y + 8)) < 30) {
@@ -380,8 +390,14 @@ void drawTopBar() {
   gfx->setTextColor(C_ORANGE);
   gfx->setCursor(28, 12);
   gfx->print("BISCUIT");
+  // GAME button (opens Treat Catch)
+  gfx->fillRoundRect(GAME_BTN_X, 10, GAME_BTN_W, 30, 15, pet.asleep ? C_BTN : C_ORANGE);
+  gfx->setTextSize(2);
+  gfx->setTextColor(pet.asleep ? C_DIM : C_BG);
+  gfx->setCursor(GAME_BTN_X + (GAME_BTN_W - 48) / 2, 18);
+  gfx->print("GAME");
   int day = (int)(pet.ageSec / 3600) + 1;  // one dog day = one hour switched on
-  const char *stage = day < 3 ? "PUPPY" : (day < 8 ? "JUNIOR" : "ADULT");
+  const char *stage = day < 3 ? "PUP" : (day < 8 ? "JR" : "ADULT");  // short: shares the bar with GAME
   char buf[24];
   snprintf(buf, sizeof(buf), "%s D%d", stage, day);
   gfx->setTextSize(2);
@@ -399,12 +415,17 @@ void drawTopBar() {
 void drawButtons() {
   const char *labels[4] = { "FEED", "PLAY", "WASH", pet.asleep ? "WAKE" : "SLEEP" };
   uint32_t now = millis();
+  bool padOn = padRead().connected;
   for (int i = 0; i < 4; i++) {
     int x0 = i * (W / 4);
     int cx = x0 + W / 8;
     bool hi = pressedBtn == i && now < pressedUntil;
     uint16_t bg = hi ? C_BTN_HI : C_BTN;
     gfx->fillRoundRect(x0 + 6, BTN_Y, W / 4 - 12, 74, 18, bg);
+    if (padOn && i == padSel) {  // controller selection ring
+      gfx->drawRoundRect(x0 + 6, BTN_Y, W / 4 - 12, 74, 18, C_ORANGE);
+      gfx->drawRoundRect(x0 + 7, BTN_Y + 1, W / 4 - 14, 72, 17, C_ORANGE);
+    }
     switch (i) {
       case 0: iconBone(cx, BTN_Y + 24); break;
       case 1: iconBall(cx, BTN_Y + 24); break;
@@ -513,6 +534,7 @@ void setup() {
   bool ok = gfx->begin(80000000);
   panel->setBrightness(220);
   imuInit();
+  padBegin();
   Serial.printf("board V%d display=%d psram=%u imu=%d\n", v1 ? 1 : 2, ok, ESP.getPsramSize(), imuOk);
 
   prefs.begin("dogtama", false);
@@ -537,16 +559,36 @@ void loop() {
     else if (now - bootHeld > 3000) { resetPet(); savePet(); act = A_IDLE; say("Hi! I'm Biscuit!", 2500); bootHeld = 0xFFFFFFFF; }
   } else bootHeld = 0;
 
-  // touch
-  int tx, ty;
+  // touch + controller
+  int tx = 0, ty = 0;
   bool down = readTouch(tx, ty);
-  if (down && !wasDown) {
-    lastTouch = now;
-    if (dimmed) { dimmed = false; panel->setBrightness(220); }
-    else onTap(tx, ty);
-  }
+  bool tap = down && !wasDown;
   wasDown = down;
-  if (!dimmed && now - lastTouch > 45000) { dimmed = true; panel->setBrightness(40); }
+  static PadState padPrev = {};
+  PadState pad = padRead();
+  bool padPressed = pad.connected && (pad.left != padPrev.left || pad.right != padPrev.right || pad.a != padPrev.a ||
+                                      pad.b != padPrev.b || pad.start != padPrev.start || abs(pad.lx) > 40);
+  if (tap || padPressed) {
+    lastTouch = now;
+    if (dimmed) { dimmed = false; panel->setBrightness(220); tap = false; padPrev = pad; }
+  }
+  if (!dimmed && now - lastTouch > 45000 && !gameActive) { dimmed = true; panel->setBrightness(40); }
+
+  if (gameActive) {
+    gameFrame(now, dt, pad, padPrev, down, tap, tx, ty);
+    padPrev = pad;
+    return;
+  }
+
+  if (tap) onTap(tx, ty);
+  if (pad.connected && !dimmed) {
+    if (pad.left && !padPrev.left) padSel = (padSel + 3) % 4;
+    if (pad.right && !padPrev.right) padSel = (padSel + 1) % 4;
+    if (pad.a && !padPrev.a) onButton(padSel);
+    if (pad.b && !padPrev.b && !pet.asleep && (act == A_IDLE || act == A_BARK)) startAct(A_PET, 2200);
+    if (pad.start && !padPrev.start && !pet.asleep) gameEnter();
+  }
+  padPrev = pad;
 
   if (checkShake()) {
     lastTouch = now;

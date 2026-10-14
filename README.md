@@ -20,6 +20,7 @@ All the art was generated with **Higgsfield** (GPT Image 2.5) and converted to R
   - He looks sad and asks for help when a need gets low.
 - **Squash & stretch**: he breathes while sitting, squashes when he lands, and stretches up on every woof
 - **Shake the board** (QMI8658 IMU) and he gets dizzy
+- **Treat Catch** mini game, played by touch or with a wired **8BitDo controller** over USB-C
 - His stats are saved to flash, so Biscuit survives power-offs. One "dog day" is one hour powered on (Puppy → Junior → Adult).
 - The screen dims after 45 s of no touches; tap it to wake it
 
@@ -30,8 +31,61 @@ All the art was generated with **Higgsfield** (GPT Image 2.5) and converted to R
 | FEED / PLAY / WASH / SLEEP buttons | Care for Biscuit |
 | Tap the dog | Pet him |
 | Tap a poop | Clean it up |
+| **GAME** button (top bar) | Play Treat Catch |
 | Shake the board | Dizzy dog |
 | Hold **BOOT** for 3 s | Adopt a new puppy (reset) |
+
+### With an 8BitDo controller
+
+| Controller | Pet screen | Treat Catch |
+|---|---|---|
+| D-pad left / right (or left stick) | Select a care button | Run |
+| A | Press the selected button | Jump / start |
+| B | Pet Biscuit | Jump |
+| START | Open Treat Catch | Quit to the pet screen |
+
+## Mini game: Treat Catch
+
+Biscuit gallops along the floor catching falling treats:
+
+- 🦴 **Bone**: +1
+- ✨ **Golden bone**: +5
+- 🫧 **Soap bubble**: dodge it! Each one that hits costs a life (♥♥♥), and Biscuit looks horrified.
+- Treats fall faster and more soap shows up as the score climbs.
+- Your best score is saved.
+- Points turn into fun for Biscuit when you quit, and the run costs a little energy and food.
+
+You can play by touch too:
+
+- Hold the ◀ / ▶ pads at the bottom to run.
+- Tap the room to jump.
+- Tap the top bar to quit.
+
+## Playing with an 8BitDo controller over USB-C
+
+The game reads a wired **8BitDo SN30 Pro / SN30 Pro 2** (and other XInput or HID gamepads) through the board's USB-C port, using the ESP32-S3's USB host:
+
+- **XInput** pads (Xbox 360 protocol) are read directly from their interrupt endpoint.
+- **HID / DirectInput** pads are decoded by [EspUsbHost](https://github.com/tanakamasayuki/EspUsbHost).
+
+> ⚠️ **The board cannot power the controller.** Its USB-C port is device-only: 5.1k CC pull-downs, VBUS goes only into the AXP2101, and there is no 5 V boost. You need something that supplies 5 V. Either:
+> - a **USB-C hub with its own power (PD) input**: plug the hub into the board, the controller into the hub, and power into the hub's PD port; or
+> - a **powered USB OTG Y-cable** that injects 5 V.
+>
+> Run the board on its battery while the port is in host mode.
+
+SN30 Pro wired modes (from 8BitDo's manual):
+
+- **X + START**: Windows / X-input mode. Recommended.
+- **B + START**: Android / D-input mode.
+
+Hold the combo while plugging the controller in. A green dot between the ◀ ▶ pads in Treat Catch shows that a controller is connected.
+
+**Reflashing after this firmware is installed:** the USB-C port now runs as a USB host, so the PC can't reset the board into the bootloader. To flash:
+1. Hold **PWR** for 6–8 s to power off.
+2. Hold **BOOT** while powering back on, and connect the board straight to the PC.
+3. Upload.
+4. Power-cycle with PWR to run the new firmware.
 
 ## Sprites
 
@@ -101,6 +155,7 @@ You need:
 - Arduino IDE 2 or `arduino-cli`
 - The **esp32 core 3.3.x**
 - The **GFX Library for Arduino** 1.6.4 or newer
+- **EspUsbHost** 2.10 or newer, for controller support
 
 Board settings (`ESP32S3 Dev Module`):
 
@@ -144,6 +199,8 @@ The pixel data is written as string literals, so the 1 MB+ of sprites compiles i
 | File | What it is |
 |---|---|
 | `dog_tamagotchi.ino` | The game: rendering, behaviour, touch, IMU, saving |
+| `minigame.ino` | Treat Catch mini game |
+| `gamepad.h` / `gamepad.cpp` | USB host controller input (XInput + HID) |
 | `pet_types.h` | Sprite, activity and mode enums |
 | `sprites.h` / `sprites.cpp` | Generated RGB565 sprite data |
 | `sprites_src/` | Full-resolution Higgsfield images (black Shiba) |
