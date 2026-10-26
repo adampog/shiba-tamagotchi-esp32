@@ -166,13 +166,61 @@ Board settings (`ESP32S3 Dev Module`):
 | Partition Scheme | 16M Flash (3MB APP/9.9MB FATFS) |
 | USB CDC On Boot | Enabled |
 
+### Setting up `arduino-cli` from scratch (Windows)
+
+This is the exact environment that built and flashed the current firmware on 26 Oct 2026, onto a V2 board (CO5300 panel, chip revision v0.2) that shipped with Waveshare's ESP-Brookesia phone demo:
+
+| Tool | Version | How it was installed |
+|---|---|---|
+| Windows | 11 Pro | |
+| `arduino-cli` | 1.5.1 | `winget install --id ArduinoSA.CLI` |
+| esp32 core | 3.3.12 | Board Manager index below |
+| GFX Library for Arduino | 1.6.9 | `arduino-cli lib install` |
+| EspUsbHost | 2.10.1 | `arduino-cli lib install` |
+
 ```bash
-arduino-cli compile --fqbn "esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc" .
+winget install --id ArduinoSA.CLI --accept-source-agreements --accept-package-agreements
 ```
 
 ```bash
-arduino-cli upload -p COM6 --fqbn "esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc" .
+arduino-cli config init --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
 ```
+
+```bash
+arduino-cli core update-index
+```
+
+```bash
+arduino-cli core install esp32:esp32@3.3.12
+```
+
+```bash
+arduino-cli lib install "GFX Library for Arduino" "EspUsbHost"
+```
+
+On Windows the CLI lives at `C:\Program Files\Arduino CLI\arduino-cli.exe`; open a new terminal after installing so it is on your `PATH`.
+
+> **Folder name matters.** `arduino-cli` requires the sketch folder to be named after the main file, `dog_tamagotchi`. A fresh clone is named `shiba-tamagotchi-esp32`, so `arduino-cli compile .` fails with *"main file missing from sketch"*. Either clone it as `dog_tamagotchi`, or point a junction (or symlink) at the checkout and build through that:
+>
+> ```powershell
+> New-Item -ItemType Junction -Path "$env:TEMP\dog_tamagotchi" -Target C:\path\to\shiba-tamagotchi-esp32
+> ```
+
+### Compile and upload
+
+The commands below assume the sketch folder (or junction) is `dog_tamagotchi`, and put the build output in the gitignored `build/` folder of the repo. Replace `COM14` with your board's port.
+
+```bash
+arduino-cli compile --fqbn "esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc" --build-path build dog_tamagotchi
+```
+
+```bash
+arduino-cli upload -p COM14 --fqbn "esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc" --input-dir build dog_tamagotchi
+```
+
+With the stock Waveshare demo on the board, the upload works straight away over the native USB-Serial/JTAG port: no BOOT button needed. The build is about 1.8 MB (57% of the 3 MB app partition).
+
+**After the upload the COM port disappears.** That is expected: the firmware switches the USB-C port to host mode for the controller, so the PC no longer sees a serial device and you cannot read a boot log. A board that is crash-looping would keep re-appearing on the USB bus every second or so; one that stays off the bus is running. Check the screen: Biscuit should be in his room. To flash again later, follow the BOOT-button steps under *Reflashing after this firmware is installed* above.
 
 ### Troubleshooting a black screen
 
